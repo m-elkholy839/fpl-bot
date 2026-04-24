@@ -1,0 +1,15 @@
+name: FPL-Smart-Check
+on:
+  schedule:
+    - cron: '0 * * * *' # هيشتغل لوحده كل ساعة
+  workflow_dispatch: # عشان تقدر تشغله يدوي لو حبيت
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - run: pip install requests
+      - run: python fpl_bot.py
