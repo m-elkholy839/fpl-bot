@@ -1,47 +1,63 @@
 import requests
+import sys
 from datetime import datetime, timezone
 
-# الإعدادات
+# --- إعداداتك ---
 TOPIC_NAME = "mahmoud2026"
 MY_TEAM_ID = 8610005
 
-def send_alert(title, msg):
+def send_alert(title, msg, tags="soccer"):
     requests.post(f"https://ntfy.sh/{TOPIC_NAME}", 
                   data=msg.encode('utf-8'),
-                  headers={"Title": title, "Priority": "high", "Tags": "alarm_clock,soccer"})
+                  headers={"Title": title, "Priority": "high", "Tags": tags})
 
-def get_fpl_updates():
-    url = "https://fantasy.premierleague.com/api/bootstrap-static/"
-    data = requests.get(url).json()
+def run_fpl_engine():
+    # 1. سحب البيانات
+    data = requests.get("https://fantasy.premierleague.com/api/bootstrap-static/").json()
+    player_names = {p['id']: p['web_name'] for p in data['elements']}
+    current_gw = next(e for e in data['events'] if e['is_current'])
     
-    # جلب الديدلاين الجاي
-    next_event = next(e for e in data['events'] if e['is_next'])
-    deadline_str = next_event['deadline_time'] # UTC time
-    deadline_dt = datetime.strptime(deadline_str, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
+    # 2. سحب تشكيلتك (بتتحدث لوحدها لو غيرت أي حاجة)
+    picks_url = f"https://fantasy.premierleague.com/api/entry/{MY_TEAM_ID}/event/{current_gw['id']}/picks/"
+    my_picks = [p['element'] for p in requests.get(picks_url).json()['picks']]
     
-    # حساب الفرق بالوقت
-    diff = deadline_dt - now
-    hours_left = diff.total_seconds() / 3600
+    # 3. فحص الأهداف والإنذارات (Live)
+    live_url = f"https://fantasy.premierleague.com/api/event/{current_gw['id']}/live/"
+    live_data = requests.get(live_url).json()['elements']
+    alerts = []
+    for p in live_data:
+        if p['id'] in my_picks:
+            stats = p['explain'][0]['stats'] if p['explain'] else []
+            for s in stats:
+                if s['identifier'] in ['goals_scored', 'assists', 'red_cards'] and s['value'] > 0:
+                    action = "جول! ⚽" if s['identifier'] == 'goals_scored' else "أسيست 🅰️"
+                    if s['identifier'] == 'red_cards': action = "كارت أحمر 🟥"
+                    alerts.append(f"{player_names[p['id']]}: {action}")
 
-    # 1. تنبيه الـ 24 ساعة
+    if alerts:
+        send_alert("تحديث لايف لفرقتك 🔥", "\n".join(alerts))
+
+    # 4. تنبيهات المواعيد (الديدلاين ونشرة 9 مساءً)
+    next_gw = next(e for e in data['events'] if e['is_next'])
+    deadline_dt = datetime.strptime(next_gw['deadline_time'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+    hours_left = (deadline_dt - datetime.now(timezone.utc)).total_seconds() / 3600
+    now_hour = datetime.now(timezone.utc).hour
+
+    # شرط إرسال التقرير: (لو ميعاد ديدلاين) أو (الساعة 9 بالليل) أو (لو إنت شغلته يدوي حالا)
+    # إحنا هنخلي أي تشغيل يدوي يبعت "تقرير الحالة"
+    is_manual = True # ده افتراضي عشان يبعتلك لما تدوس Run حالا
+    
+    report_msg = ""
     if 23 <= hours_left < 24:
-        msg = f"⏰ يا حودة، فاضل 24 ساعة على الديدلاين!\nجهز تشكيلتك يا بطل لماتشات {next_event['name']}."
-        send_alert("تنبيه الـ 24 ساعة 🚨", msg)
-
-    # 2. تنبيه الساعة الأخيرة
+        report_msg = f"⏰ فاضل 24 ساعة على ديدلاين {next_gw['name']}!"
     elif 0 <= hours_left < 1:
-        msg = f"🏃‍♂️ إلحق يا عالمي! فاضل ساعة واحدة والديدلاين يقفل.\nتأكد من الكابتن والدكة فوراً!"
-        send_alert("تنبيه الساعة الأخيرة ⚠️", msg)
+        report_msg = f"⚠️ إلحق! ساعة واحدة والديدلاين يقفل!"
+    elif now_hour == 18 or is_manual: # 18 UTC يعني 9 بتوقيت مصر
+        top_3 = sorted(data['elements'], key=lambda x: x['event_points'], reverse=True)[:3]
+        report_msg = f"📊 وضعك الحالي:\n- جولة: {current_gw['name']}\n🌟 توب الجولة: " + ", ".join([p['web_name'] for p in top_3])
 
-    # 3. ملخص التألق (لو مفيش ديدلاين قريب)
-    # ممكن نخليه يبعت ملخص أفضل لعيبة لو السكريبت اشتغل في ميعاد ثابت
-    else:
-        top_players = sorted(data['elements'], key=lambda x: x['event_points'], reverse=True)[:3]
-        names = [f"{p['web_name']} ({p['event_points']} pt)" for p in top_players]
-        msg = f"🌟 وحوش الجولة دي لحد دلوقتي:\n" + "\n".join(names)
-        # هنا هيبعت بس لو إنت شغلت البوت يدوي أو في ميعاد ثابت
-        print("تشغيل روتيني: " + msg)
+    if report_msg:
+        send_alert("تقرير الفانتازي 📋", report_msg, "mag")
 
 if __name__ == "__main__":
-    get_fpl_updates()
+    run_fpl_engine()
