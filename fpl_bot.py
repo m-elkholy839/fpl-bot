@@ -7,20 +7,24 @@ TOPIC_NAME = "mahmoud2026"
 def send_alert(msg):
     requests.post(f"https://ntfy.sh/{TOPIC_NAME}", 
                   data=msg.encode('utf-8'),
-                  headers={"Priority": "high", "Tags": "star2,soccer"})
+                  headers={"Priority": "high", "Tags": "star2,soccer,trophy"})
 
 def run_fpl_logic():
     try:
-        # 1. سحب البيانات العامة والأندية
+        # 1. سحب البيانات العامة، الأندية، والمراكز
         r_base = requests.get("https://fantasy.premierleague.com/api/bootstrap-static/").json()
-        teams = {t['id']: t['name'] for t in r_base['teams']}
         
-        # 2. تجهيز قائمة التوب 5 بأنديتهم (عشان نستخدمها في أي رسالة)
+        teams = {t['id']: t['name'] for t in r_base['teams']}
+        # قاموس للمراكز (GKP, DEF, MID, FWD)
+        positions = {pt['id']: pt['singular_name_short'] for pt in r_base['element_types']}
+        
+        # 2. تجهيز التوب 5 بالمركز والنادي والنقط
         top_5 = sorted(r_base['elements'], key=lambda x: x['event_points'], reverse=True)[:5]
-        top_report = "\n🌟 توب الجولة حالياً:\n"
+        top_report = "\n🌟 وحوش الجولة حالياً:\n"
         for p in top_5:
             p_team = teams[p['team_code_next'] if 'team_code_next' in p else p['team']]
-            top_report += f"- {p['web_name']} ({p_team}): {p['event_points']} pt\n"
+            p_pos = positions[p['element_type']]
+            top_report += f"- [{p_pos}] {p['web_name']} ({p_team}): {p['event_points']} pt\n"
 
         # 3. فحص الديدلاين
         next_gw = next((e for e in r_base['events'] if e['is_next']), r_base['events'][0])
@@ -34,11 +38,11 @@ def run_fpl_logic():
             send_alert(f"⏰ يا حودة، فاضل 24 ساعة على ديدلاين {next_gw['name']}!\n{top_report}")
         
         elif now_hour == 18: # نشرة 9 مساءً الأوتوماتيكية
-            send_alert(f"📊 ملخص 9 مساءً يا هندسة\n{top_report}")
+            send_alert(f"📊 ملخص 9 مساءً يا إكسلانس\n{top_report}")
         
         else:
-            # دي اللي هتبعتلك لما تدوس Run يدوي في أي وقت تاني
-            send_alert(f"✅ السيستم صاحي ومتابع يا إكسلانس!\n{top_report}")
+            # لما تدوس Run يدوي في أي وقت
+            send_alert(f"✅ السيستم صاحي وبيرسل لك الخلاصة:\n{top_report}")
 
     except Exception as e:
         print(f"Error: {e}")
